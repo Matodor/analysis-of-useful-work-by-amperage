@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenericCurrentPlayground</title>
+
+    <script type="text/javascript" src="./generic_current.js"></script>
+    <script type="text/javascript" src="./dygraph.min.js"></script>
+    <script type="text/javascript" src="./synchronizer.js"></script>
+    <link rel="stylesheet" type="text/css" href="./dygraph.min.css" />
+</head>
+
+<body>
+    <div id="dygraph1" style="width: 100%; height: 150px;"></div>
+    <div id="dygraph2" style="width: 100%; height: 150px;"></div>
+    <div id="dygraph3" style="width: 100%; height: 150px;"></div>
+    <div id="dygraph4" style="width: 100%; height: 150px;"></div>
+    <div id="dygraph5" style="width: 100%; height: 150px;"></div>
+    <div id="dygraph6" style="width: 100%; height: 150px;"></div>
+
+    <script>
+        const getPreparedData = (data, period = 5000) => {
+            const preparedData = [];
+            const timeFrom = data[0].time;
+            const timeTo = data[data.length - 1].time;
+
+            let time = timeFrom;
+            let i = 0;
+            let p = data[0].data_float;
+
+            while (time < timeTo) {
+                let n = 0;
+                let s = 0;
+
+                while (data[i] !== undefined
+                    && data[i].time >= time
+                    && data[i].time < time + period
+                ) {
+                    s += data[i].data_float;
+                    i++;
+                    n++;
+                }
+
+                const v = n === 0 ? p : s / n;
+
+                preparedData.push({
+                    time: time + period,
+                    data_float: v,
+                });
+
+                p = v;
+                time += period;
+            }
+
+            return preparedData;
+        }
+
+        const load = () => {
+            const { generic_current: genericCurrentData } = window['genericCurrentData'];
+            const maxValue = 300;
+            const preparedData = getPreparedData(genericCurrentData, 100);
+            const dataMovingAverage = preparedData.map((item, itemIndex, array) => {
+                const ticks = 10;
+
+                if (itemIndex < ticks - 1) {
+                    return {
+                        time: item.time,
+                        data_float: 0,
+                    };
+                }
+
+                let index = itemIndex - (ticks - 1);
+                let s = 0;
+
+                while (index <= itemIndex) {
+                    s += array[index++].data_float;
+                }
+
+                return {
+                    time: item.time,
+                    data_float: s / ticks < 50 ? 0 : s / ticks,
+                };
+            });
+
+            const dataDerivative = dataMovingAverage.map((item, itemIndex, array) => {
+                const ticks = (1000 / 100) * 3;
+
+                if (itemIndex < ticks - 1) {
+                    return {
+                        time: item.time,
+                        data_float: 0,
+                    };
+                }
+
+                let index = itemIndex - (ticks - 1) + 1;
+                let s = 0;
+
+                while (index <= itemIndex) {
+                    const a = array[index - 1];
+                    const b = array[index];
+                    const d = (((b.data_float - a.data_float) / maxValue) * 100) / (b.time - a.time);
+
+                    s += Math.abs(d);
+                    index++;
+                }
+
+                return {
+                    time: item.time,
+                    data_float: s,
+                };
+            });
+
+            const data1 = genericCurrentData.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data2 = preparedData.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data3 = dataMovingAverage.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data4 = [];
+
+            for (let i = 1; i < dataMovingAverage.length; i++) {
+                const a = dataMovingAverage[i - 1];
+                const b = dataMovingAverage[i];
+                const d = ((b.data_float - a.data_float) / maxValue) / (b.time - a.time);
+
+                data4.push([new Date(b.time), d]);
+            }
+
+            const data5 = dataDerivative.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data6 = [];
+
+            {
+                let maxDerivativeIndex = 0;
+                let maxDerivativeValue = 0;
+                let zeroDerivativeIndex = 0;
+
+                for (let i = 0; i < dataDerivative.length; i++) {
+                    const e = dataDerivative[i];
+
+                    if (maxDerivativeValue < e.data_float) {
+                        maxDerivativeValue = e.data_float;
+                        maxDerivativeIndex = i;
+
+                        continue;
+                    }
+
+                    if (e.data_float === 0) {
+                        if (maxDerivativeValue > 0) {
+                            const duration = dataDerivative[maxDerivativeIndex].time - dataDerivative[zeroDerivativeIndex].time;
+
+                            if (duration > 1000 * 8) {
+                                data6.push([new Date(dataDerivative[zeroDerivativeIndex].time - 1), 0]);
+                                data6.push([new Date(dataDerivative[zeroDerivativeIndex].time), 1]);
+                                data6.push([new Date(dataDerivative[maxDerivativeIndex].time), 1]);
+                                data6.push([new Date(dataDerivative[maxDerivativeIndex].time + 1), 0]);
+                            }
+                        }
+
+                        maxDerivativeValue = 0;
+                        maxDerivativeIndex = 0;
+                        zeroDerivativeIndex = i;
+                    }
+                }
+            }
+
+            const gs = [
+                new Dygraph(
+                    document.getElementById("dygraph1"),
+                    data1,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+
+                new Dygraph(
+                    document.getElementById("dygraph2"),
+                    data2,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+
+                new Dygraph(
+                    document.getElementById("dygraph3"),
+                    data3,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+
+                new Dygraph(
+                    document.getElementById("dygraph4"),
+                    data4,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+
+                new Dygraph(
+                    document.getElementById("dygraph5"),
+                    data5,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+
+                new Dygraph(
+                    document.getElementById("dygraph6"),
+                    data6,
+                    {
+                        labels: ['X', 'data_float'],
+                        animatedZooms: true,
+                    },
+                ),
+            ];
+
+            Dygraph.synchronize(gs, {
+                zoom: true,
+                selection: true,
+                range: false,
+            });
+        };
+
+        if (document.readyState !== 'loading') {
+            load();
+        } else {
+            document.addEventListener('DOMContentLoaded', load);
+        }
+    </script>
+</body>
+
+</html>
