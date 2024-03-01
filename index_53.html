@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenericCurrentPlayground</title>
+
+    <script type="text/javascript" src="./generic_current_53.js"></script>
+    <script type="text/javascript" src="./dygraph.min.js"></script>
+    <script type="text/javascript" src="./synchronizer.js"></script>
+    <link rel="stylesheet" type="text/css" href="./dygraph.min.css" />
+</head>
+
+<body>
+    <div>1) Исходные данные</div>
+    <div id="dygraph1" style="width: 100%; height: 140px;"></div>
+
+    <div>2) Данные с тиком 100мс</div>
+    <div id="dygraph2" style="width: 100%; height: 140px;"></div>
+
+    <div>3) Скользящая средняя</div>
+    <div id="dygraph3" style="width: 100%; height: 140px;"></div>
+
+    <div>4) Производная от 3-его графика (> 0)</div>
+    <div id="dygraph4" style="width: 100%; height: 140px;"></div>
+
+    <div>5)</div>
+    <div id="dygraph5" style="width: 100%; height: 140px;"></div>
+
+    <div>6)</div>
+    <div id="dygraph6" style="width: 100%; height: 140px;"></div>
+
+    <div>7) Рабочие циклы</div>
+    <div id="dygraph7" style="width: 100%; height: 140px;"></div>
+
+    <div>
+        dataMovingAverageTicks:
+        <input id="dataMovingAverageTicks" type="number" />
+    </div>
+
+    <div>
+        dataDerivativeTicks:
+        <input id="dataDerivativeTicks" type="number" />
+    </div>
+
+    <div>
+        dataDerivativeTicks_2:
+        <input id="dataDerivativeTicks_2" type="number" />
+    </div>
+
+    <script>
+        const getPreparedData = (data, period = 5000) => {
+            const preparedData = [];
+            const timeFrom = data[0].time;
+            const timeTo = data[data.length - 1].time;
+
+            let time = timeFrom;
+            let i = 0;
+            let p = data[0].data_float;
+
+            while (time < timeTo) {
+                let n = 0;
+                let s = 0;
+
+                while (data[i] !== undefined
+                    && data[i].time >= time
+                    && data[i].time < time + period
+                ) {
+                    s += data[i].data_float;
+                    i++;
+                    n++;
+                }
+
+                const v = n === 0 ? p : s / n;
+
+                preparedData.push({
+                    time: time + period,
+                    data_float: v,
+                });
+
+                p = v;
+                time += period;
+            }
+
+            return preparedData;
+        };
+
+        const elInputDataMovingAverageTicks = document.getElementById('dataMovingAverageTicks');
+        const elInputDataDerivativeTicks = document.getElementById('dataDerivativeTicks');
+        const elInputDataDerivativeTicks_2 = document.getElementById('dataDerivativeTicks_2');
+
+        const config = {
+            dataMovingAverageTicks: 130,
+            dataDerivativeTicks: 40,
+            dataDerivativeTicks_2: 10,
+        };
+
+        elInputDataMovingAverageTicks.value = config.dataMovingAverageTicks;
+        elInputDataMovingAverageTicks.addEventListener('change', (event) => {
+            config.dataMovingAverageTicks = parseInt(event.target.value);
+            updateData();
+        });
+
+        elInputDataDerivativeTicks.value = config.dataDerivativeTicks;
+        elInputDataDerivativeTicks.addEventListener('change', (event) => {
+            config.dataDerivativeTicks = parseInt(event.target.value);
+            updateData();
+        });
+
+        elInputDataDerivativeTicks_2.value = config.dataDerivativeTicks_2;
+        elInputDataDerivativeTicks_2.addEventListener('change', (event) => {
+            config.dataDerivativeTicks_2 = parseInt(event.target.value);
+            updateData();
+        });
+
+        const { generic_current: genericCurrentData } = window['genericCurrentData'];
+        const maxValue = 300;
+        const preparedData = getPreparedData(genericCurrentData, 100);
+
+        const getDataMovingAverage = (input, ticks) => {
+            return input.map((item, itemIndex, array) => {
+                if (itemIndex < ticks - 1) {
+                    return {
+                        time: item.time,
+                        data_float: item.data_float,
+                    };
+                }
+
+                let index = itemIndex - (ticks - 1);
+                let s = 0;
+
+                while (index <= itemIndex) {
+                    s += array[index++].data_float;
+                }
+
+                return {
+                    time: item.time,
+                    data_float: s / ticks < 50 ? 0 : s / ticks,
+                };
+            });
+        };
+
+        const getDataDerivative = (input, ticks) => {
+            return input.map((item, itemIndex, array) => {
+                if (itemIndex < ticks - 1) {
+                    return {
+                        time: item.time,
+                        data_float: 0,
+                    };
+                }
+
+                let index = itemIndex - (ticks - 1) + 1;
+                let s = 0;
+
+                while (index <= itemIndex) {
+                    const a = array[index - 1];
+                    const b = array[index];
+                    const d = (((b.data_float - a.data_float) / maxValue) * 100) / (b.time - a.time);
+
+                    if (d > 0) {
+                        s += d;
+                    }
+
+                    // s += Math.abs(d);
+                    index++;
+                }
+
+                return {
+                    time: item.time,
+                    data_float: s,
+                };
+            });
+        };
+
+        const getDataDerivativeSum = (input, ticks) => {
+            return input.reduce((output, item, itemIndex) => {
+                let index = itemIndex - (ticks - 1);
+                let s = item.data_float;
+
+                while (index >= 0 && index < itemIndex) {
+                    s += input[index].data_float;
+                    index++;
+                }
+
+                output.push({
+                    time: item.time,
+                    data_float: s > 0.1 ? s : 0,
+                });
+
+                return output;
+            }, []);
+        };
+
+        const getDataArray = (
+            dataMovingAverageTicks,
+            dataDerivativeTicks,
+            dataDerivativeTicks_2,
+        ) => {
+            const dataMovingAverage = getDataMovingAverage(preparedData, dataMovingAverageTicks);
+            const dataDerivative = getDataDerivative(dataMovingAverage, dataDerivativeTicks);
+            const dataDerivativePositive = dataMovingAverage.map((item, index, array) => {
+                if (index === 0) {
+                    return {
+                        time: item.time,
+                        data_float: 0,
+                    };
+                }
+
+                const a = array[index - 1];
+                const b = array[index];
+                const d = ((b.data_float - a.data_float) / maxValue) / (b.time - a.time);
+
+                return {
+                    time: item.time,
+                    data_float: d > 0 ? d * 10000 : 0,
+                };
+            });
+
+            const data1 = genericCurrentData.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data2 = preparedData.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data3 = dataMovingAverage.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data4 = dataDerivativePositive.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data5Raw = getDataDerivativeSum(dataDerivativePositive, dataDerivativeTicks);
+            const data5 = data5Raw.map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data6 = getDataDerivative(dataDerivative, dataDerivativeTicks_2).map((item) => {
+                return [new Date(item.time), item.data_float];
+            });
+
+            const data7 = [];
+
+            {
+                let maxDerivativeIndex = 0;
+                let maxDerivativeValue = 0;
+                let zeroDerivativeIndex = 0;
+
+                for (let i = 0; i < data5Raw.length; i++) {
+                    const e = data5Raw[i];
+
+                    if (maxDerivativeValue < e.data_float) {
+                        maxDerivativeValue = e.data_float;
+                        maxDerivativeIndex = i;
+
+                        continue;
+                    }
+
+                    if (e.data_float === 0) {
+                        if (maxDerivativeValue > 2) {
+                            const duration = data5Raw[maxDerivativeIndex].time - data5Raw[zeroDerivativeIndex].time;
+
+                            if (duration > 1000 * 4) {
+                                data7.push([new Date(data5Raw[zeroDerivativeIndex].time - 1), 0]);
+                                data7.push([new Date(data5Raw[zeroDerivativeIndex].time), 1]);
+                                data7.push([new Date(data5Raw[maxDerivativeIndex].time), 1]);
+                                data7.push([new Date(data5Raw[maxDerivativeIndex].time + 1), 0]);
+                            }
+                        }
+
+                        maxDerivativeValue = 0;
+                        maxDerivativeIndex = 0;
+                        zeroDerivativeIndex = i;
+                    }
+                }
+            }
+
+            return [
+                data1,
+                data2,
+                data3,
+                data4,
+                data5,
+                data6,
+                data7,
+            ];
+        }
+
+        const gs = Array(7).fill(null);
+        const load = () => {
+            const [
+                data1,
+                data2,
+                data3,
+                data4,
+                data5,
+                data6,
+                data7,
+            ] = getDataArray(
+                config.dataMovingAverageTicks,
+                config.dataDerivativeTicks,
+                config.dataDerivativeTicks_2,
+            );
+
+            gs[0] = new Dygraph(
+                document.getElementById("dygraph1"),
+                data1,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[1] = new Dygraph(
+                document.getElementById("dygraph2"),
+                data2,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[2] = new Dygraph(
+                document.getElementById("dygraph3"),
+                data3,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[3] = new Dygraph(
+                document.getElementById("dygraph4"),
+                data4,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[4] = new Dygraph(
+                document.getElementById("dygraph5"),
+                data5,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[5] = new Dygraph(
+                document.getElementById("dygraph6"),
+                data6,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            gs[6] = new Dygraph(
+                document.getElementById("dygraph7"),
+                data7,
+                {
+                    labels: ['X', 'data_float'],
+                    animatedZooms: true,
+                },
+            );
+
+            Dygraph.synchronize(gs, {
+                zoom: true,
+                selection: true,
+                range: false,
+            });
+        };
+
+        const updateData = () => {
+            const [
+                data1,
+                data2,
+                data3,
+                data4,
+                data5,
+                data6,
+                data7,
+            ] = getDataArray(
+                config.dataMovingAverageTicks,
+                config.dataDerivativeTicks,
+                config.dataDerivativeTicks_2,
+            );
+
+            gs[0].updateOptions({ 'file': data1 });
+            gs[1].updateOptions({ 'file': data2 });
+            gs[2].updateOptions({ 'file': data3 });
+            gs[3].updateOptions({ 'file': data4 });
+            gs[4].updateOptions({ 'file': data5 });
+            gs[5].updateOptions({ 'file': data6 });
+            gs[6].updateOptions({ 'file': data7 });
+        };
+
+        if (document.readyState !== 'loading') {
+            load();
+        } else {
+            document.addEventListener('DOMContentLoaded', load);
+        }
+    </script>
+</body>
+
+</html>
